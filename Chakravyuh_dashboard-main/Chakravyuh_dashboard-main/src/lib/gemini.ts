@@ -1,16 +1,113 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai/web";
 
 // Initialize Gemini API
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
-const genAI = API_KEY ? new GoogleGenerativeAI(API_KEY) : null;
+const genAI = API_KEY ? new GoogleGenAI({ apiKey: API_KEY }) : null;
 
-// Use Gemini Pro model
-const getModel = () => {
+// Debug: Log API key status in development (first 10 chars only for security)
+if (import.meta.env.DEV) {
+  console.log('[Gemini API Init]', {
+    hasAPIKey: !!API_KEY,
+    apiKeyLength: API_KEY.length,
+    apiKeyPreview: API_KEY ? `${API_KEY.substring(0, 10)}...` : 'none',
+    hasGenAI: !!genAI,
+    envVarValue: import.meta.env.VITE_GEMINI_API_KEY ? `${import.meta.env.VITE_GEMINI_API_KEY.substring(0, 10)}...` : 'not set'
+  });
+}
+
+// Common Gemini model names to try (in order of preference)
+// Note: Model availability depends on your API key, region, and billing tier
+const DEFAULT_MODELS = [
+  "gemini-3-flash-preview",
+  "gemini-2.5-flash-preview",
+  "gemini-1.5-flash",
+  "gemini-1.5-flash-latest",
+  "gemini-1.5-pro",
+  "gemini-1.5-pro-latest",
+  "gemini-pro"
+];
+
+// Rate limiting: Track last request time and implement throttling
+let lastRequestTime = 0;
+const MIN_REQUEST_INTERVAL = 1000; // Minimum 1 second between requests
+
+// Helper function to wait/delay
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Helper function to try multiple models if one fails, with retry logic for rate limits
+async function tryGenerateContent(prompt: string, models: string[] = DEFAULT_MODELS, retryCount = 0): Promise<any> {
   if (!genAI) {
-    throw new Error("Gemini API key not configured. Please set VITE_GEMINI_API_KEY in your .env file");
+    throw new Error("Gemini API key not configured");
   }
-  return genAI.getGenerativeModel({ model: "gemini-pro" });
-};
+  
+  // Rate limiting: Ensure minimum time between requests
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastRequestTime;
+  if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
+    await delay(MIN_REQUEST_INTERVAL - timeSinceLastRequest);
+  }
+  lastRequestTime = Date.now();
+  
+  let lastError: any = null;
+  for (const modelName of models) {
+    try {
+      const response = await genAI.models.generateContent({
+        model: modelName,
+        contents: prompt
+      });
+      
+      return response;
+    } catch (error: any) {
+      lastError = error;
+      
+      // Check for HTTP status codes (404, 400, etc.)
+      const statusCode = error?.status || error?.response?.status || error?.code;
+      const errorMessage = error?.message || String(error) || "";
+      
+      // Handle rate limiting (429) with exponential backoff retry
+      if (statusCode === 429 || errorMessage.includes("429") || errorMessage.includes("rate limit") || errorMessage.includes("too many requests") || errorMessage.includes("RESOURCE_EXHAUSTED")) {
+        const maxRetries = 3;
+        if (retryCount < maxRetries) {
+          const backoffDelay = Math.min(1000 * Math.pow(2, retryCount), 10000); // Max 10 seconds
+          console.warn(`[Gemini API] Rate limit hit (429). Retrying in ${backoffDelay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+          await delay(backoffDelay);
+          return tryGenerateContent(prompt, models, retryCount + 1);
+        } else {
+          console.error(`[Gemini API] Rate limit exceeded after ${maxRetries} retries. Please wait before making more requests.`);
+          throw new Error("Rate limit exceeded. Please wait a few moments before trying again.");
+        }
+      }
+      
+      // Log detailed error for debugging
+      console.error(`[Gemini API] Model ${modelName} failed:`, {
+        statusCode,
+        message: errorMessage,
+        error: error
+      });
+      
+      // If it's a model-specific error (404, MODEL_NOT_FOUND, or mentions model), try next model
+      const isModelError = statusCode === 404 || 
+                          errorMessage.includes("model") || 
+                          errorMessage.includes("MODEL_NOT_FOUND") ||
+                          errorMessage.includes("not found") ||
+                          errorMessage.includes("Not Found");
+      
+      // If it's not a model-specific error (API key, quota, etc.), don't try other models
+      if (!isModelError) {
+        console.error(`[Gemini API] Non-model error detected, not trying other models:`, error);
+        throw error;
+      }
+      
+      console.warn(`[Gemini API] Model ${modelName} failed (likely not available), trying next...`);
+      continue;
+    }
+  }
+  
+  // All models failed
+  const errorMsg = lastError?.message || String(lastError) || "Unknown error";
+  console.error(`[Gemini API] All models failed. Last error:`, lastError);
+  throw new Error(`All Gemini models failed. Last error: ${errorMsg}`);
+}
 
 export interface ThreatAssessment {
   threatLevel: "low" | "medium" | "high" | "critical";
@@ -87,10 +184,8 @@ Consider:
 Respond ONLY with valid JSON, no markdown formatting, no code blocks.`;
 
   try {
-    const model = getModel();
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    const response = await tryGenerateContent(prompt);
+    const text = response.text || "";
     
     // Parse JSON response
     const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -100,8 +195,26 @@ Respond ONLY with valid JSON, no markdown formatting, no code blocks.`;
     }
     
     throw new Error("Invalid response format");
-  } catch (error) {
-    console.error("Gemini API Error:", error);
+  } catch (error: any) {
+    console.error("[Gemini API] Threat Intelligence Error:", error);
+    
+    // Handle specific API errors with detailed logging
+    const statusCode = error?.status || error?.response?.status || error?.code;
+    const errorMessage = error?.message || String(error) || "";
+    
+    if (statusCode === 401 || errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("API key")) {
+      console.error("[Gemini API] Invalid API key. Please check your VITE_GEMINI_API_KEY in .env");
+    } else if (statusCode === 403 || errorMessage.includes("PERMISSION_DENIED")) {
+      console.error("[Gemini API] Permission denied. Check API key permissions and billing status.");
+    } else if (statusCode === 429 || errorMessage.includes("QUOTA_EXCEEDED") || errorMessage.includes("rate limit") || errorMessage.includes("too many requests")) {
+      console.error("[Gemini API] Rate limit exceeded (429). Too many requests. Please wait before trying again.");
+    } else if (statusCode === 404 || errorMessage.includes("model") || errorMessage.includes("MODEL_NOT_FOUND")) {
+      console.error("[Gemini API] Model not found (404). The model may not be available for your API key or region.");
+      console.error("[Gemini API] Please check: 1) Model availability in Google AI Studio, 2) Billing enabled, 3) Correct model name");
+    } else {
+      console.error("[Gemini API] Unexpected error:", { statusCode, message: errorMessage, error });
+    }
+    
     return getDefaultThreatAssessment();
   }
 }
@@ -134,12 +247,16 @@ Create a 2-3 sentence summary that:
 Keep it concise and actionable.`;
 
   try {
-    const model = getModel();
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
-  } catch (error) {
-    console.error("Gemini API Error:", error);
+    const response = await tryGenerateContent(prompt);
+    return response.text || `${alert.alertType} detected at ${alert.nodeId} in ${nodeInfo.sector}`;
+  } catch (error: any) {
+    console.error("[Gemini API] Alert Summary Error:", error);
+    const statusCode = error?.status || error?.response?.status || error?.code;
+    const errorMessage = error?.message || String(error) || "";
+    
+    if (statusCode === 401 || errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("API key")) {
+      console.error("[Gemini API] Invalid API key. Please check your VITE_GEMINI_API_KEY in .env");
+    }
     return `${alert.alertType} detected at ${alert.nodeId} in ${nodeInfo.sector}`;
   }
 }
@@ -175,10 +292,8 @@ Consider:
 Format as a numbered list of actionable recommendations.`;
 
   try {
-    const model = getModel();
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    const response = await tryGenerateContent(prompt);
+    const text = response.text || "";
     
     // Extract recommendations (numbered list)
     const recommendations = text
@@ -189,8 +304,14 @@ Format as a numbered list of actionable recommendations.`;
       .slice(0, 5);
     
     return recommendations.length > 0 ? recommendations : ["Review situation manually"];
-  } catch (error) {
-    console.error("Gemini API Error:", error);
+  } catch (error: any) {
+    console.error("[Gemini API] Decision Support Error:", error);
+    const statusCode = error?.status || error?.response?.status || error?.code;
+    const errorMessage = error?.message || String(error) || "";
+    
+    if (statusCode === 401 || errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("API key")) {
+      console.error("[Gemini API] Invalid API key. Please check your VITE_GEMINI_API_KEY in .env");
+    }
     return ["Review alerts manually", "Check network status", "Assess drone availability"];
   }
 }
@@ -234,10 +355,8 @@ Respond in JSON format (ONLY JSON, no markdown):
 }`;
 
   try {
-    const model = getModel();
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    const response = await tryGenerateContent(prompt);
+    const text = response.text || "";
     
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
@@ -250,8 +369,14 @@ Respond in JSON format (ONLY JSON, no markdown):
       confidence: 0,
       suggestedActions: []
     };
-  } catch (error) {
-    console.error("Gemini API Error:", error);
+  } catch (error: any) {
+    console.error("[Gemini API] Anomaly Detection Error:", error);
+    const statusCode = error?.status || error?.response?.status || error?.code;
+    const errorMessage = error?.message || String(error) || "";
+    
+    if (statusCode === 401 || errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("API key")) {
+      console.error("[Gemini API] Invalid API key. Please check your VITE_GEMINI_API_KEY in .env");
+    }
     return {
       isAnomaly: false,
       explanation: "Analysis unavailable",
@@ -298,12 +423,16 @@ Create a comprehensive report with:
 Use professional military reporting format.`;
 
   try {
-    const model = getModel();
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
-  } catch (error) {
-    console.error("Gemini API Error:", error);
+    const response = await tryGenerateContent(prompt);
+    return response.text || "Report generation unavailable.";
+  } catch (error: any) {
+    console.error("[Gemini API] Intelligence Report Error:", error);
+    const statusCode = error?.status || error?.response?.status || error?.code;
+    const errorMessage = error?.message || String(error) || "";
+    
+    if (statusCode === 401 || errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("API key")) {
+      console.error("[Gemini API] Invalid API key. Please check your VITE_GEMINI_API_KEY in .env");
+    }
     return "Report generation unavailable.";
   }
 }
@@ -334,12 +463,16 @@ Provide analysis on:
 Format as a structured analysis report.`;
 
   try {
-    const model = getModel();
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
-  } catch (error) {
-    console.error("Gemini API Error:", error);
+    const response = await tryGenerateContent(prompt);
+    return response.text || "Pattern analysis unavailable.";
+  } catch (error: any) {
+    console.error("[Gemini API] Pattern Analysis Error:", error);
+    const statusCode = error?.status || error?.response?.status || error?.code;
+    const errorMessage = error?.message || String(error) || "";
+    
+    if (statusCode === 401 || errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("API key")) {
+      console.error("[Gemini API] Invalid API key. Please check your VITE_GEMINI_API_KEY in .env");
+    }
     return "Pattern analysis unavailable.";
   }
 }
@@ -363,6 +496,15 @@ function getDefaultThreatAssessment(): ThreatAssessment {
  * Check if Gemini API is configured
  */
 export function isGeminiConfigured(): boolean {
+  // Debug: Log API key status (only in development)
+  if (import.meta.env.DEV) {
+    const envKey = import.meta.env.VITE_GEMINI_API_KEY || "";
+    console.log('[Gemini Config Check]', {
+      hasAPIKey: !!envKey,
+      apiKeyLength: envKey.length,
+      hasGenAI: !!genAI,
+      configured: !!genAI && API_KEY.length > 0
+    });
+  }
   return !!genAI && API_KEY.length > 0;
 }
-

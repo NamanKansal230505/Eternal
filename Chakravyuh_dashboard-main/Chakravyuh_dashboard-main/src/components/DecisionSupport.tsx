@@ -62,8 +62,14 @@ const DecisionSupport: React.FC<DecisionSupportProps> = ({
   };
 
   useEffect(() => {
+    // Debounce: Only fetch recommendations after 3 seconds of no changes
+    // This prevents too many API calls when alerts are rapidly changing
     if (alerts.length > 0) {
-      fetchRecommendations();
+      const timeoutId = setTimeout(() => {
+        fetchRecommendations();
+      }, 3000); // Wait 3 seconds before making API call
+      
+      return () => clearTimeout(timeoutId);
     }
   }, [alerts.length, networkStatus.activeNodes]);
 
