@@ -24,6 +24,8 @@
 - [Prerequisites](#-prerequisites)
 - [Quick Start](#-quick-start)
 - [Configuration](#-configuration)
+  - [Authentication (Auth0)](#authentication-auth0)
+  - [Firebase Configuration](#firebase-configuration)
 - [Project Structure](#-project-structure)
 - [Architecture](#-architecture)
 - [Usage Guide](#-usage-guide)
@@ -99,6 +101,7 @@
 ### Backend & Services
 - **Firebase 11.6.1** - Realtime Database
 - **Google Gemini AI** - AI analysis and intelligence
+- **Auth0** - Secure authentication and user management
 
 ### Maps & Visualization
 - **Leaflet 1.9.4** - Interactive maps
@@ -119,6 +122,7 @@ Before you begin, ensure you have the following installed:
 - **Node.js** (v18 or higher) - [Download](https://nodejs.org/)
 - **npm** or **yarn** or **bun** - Package manager
 - **Firebase Account** - For database access
+- **Auth0 Account** - For authentication (free tier available)
 - **Google AI Studio Account** - For Gemini API key (optional, for AI features)
 
 ---
@@ -147,13 +151,32 @@ bun install
 Create a `.env` file in the root directory:
 
 ```env
+# Auth0 Configuration (required for authentication)
+VITE_AUTH0_DOMAIN=your-tenant.auth0.com
+VITE_AUTH0_CLIENT_ID=your-client-id-here
+VITE_AUTH0_AUDIENCE=your-api-identifier (optional)
+
 # Google Gemini AI API Key (optional - for AI features)
 VITE_GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-> **Note**: Get your Gemini API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
+> **Note**: 
+> - Get your Auth0 credentials from [Auth0 Dashboard](https://manage.auth0.com/) - See [AUTH0_SETUP.md](AUTH0_SETUP.md) for detailed setup
+> - Get your Gemini API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
 
-### 4. Start Development Server
+### 4. Configure Auth0 (Required for Authentication)
+
+1. **Create Auth0 Account**: Sign up at [https://auth0.com/signup](https://auth0.com/signup)
+2. **Create Application**: Create a Single Page Application in Auth0 Dashboard
+3. **Configure URLs**: Add these to your Auth0 Application Settings:
+   - **Allowed Callback URLs**: `http://localhost:8080/callback`, `http://localhost:8081/callback`, `http://localhost:5173/callback`
+   - **Allowed Logout URLs**: `http://localhost:8080`, `http://localhost:8081`, `http://localhost:5173`
+   - **Allowed Web Origins**: `http://localhost:8080`, `http://localhost:8081`, `http://localhost:5173`
+4. **Get Credentials**: Copy your Domain and Client ID to `.env` file
+
+> **📖 Detailed Setup**: See [AUTH0_SETUP.md](AUTH0_SETUP.md) for complete Auth0 configuration guide
+
+### 5. Start Development Server
 
 ```bash
 npm run dev
@@ -163,18 +186,52 @@ yarn dev
 bun dev
 ```
 
-The application will be available at `http://localhost:5173` (or the port shown in terminal)
+The application will be available at `http://localhost:8080` (or the port shown in terminal)
 
-### 5. Access the Application
+### 6. Access the Application
 
-- **Login Page**: `http://localhost:5173/`
-- **Dashboard**: `http://localhost:5173/dashboard`
-- **AI Intelligence**: `http://localhost:5173/ai-intelligence`
-- **Regions**: `http://localhost:5173/regions`
+- **Login Page**: `http://localhost:8080/` (or port shown in terminal)
+- **Dashboard**: `http://localhost:8080/dashboard` (requires authentication)
+- **AI Intelligence**: `http://localhost:8080/ai-intelligence` (requires authentication)
+- **Regions**: `http://localhost:8080/regions` (requires authentication)
+
+> **🔒 Authentication**: All dashboard routes require Auth0 login. If Auth0 is not configured, you'll see a "Continue to Dashboard" button for development.
 
 ---
 
 ## ⚙️ Configuration
+
+### Authentication (Auth0)
+
+Chakravyuh uses Auth0 for secure authentication. All dashboard routes are protected and require login.
+
+**Setup Steps:**
+
+1. **Create Auth0 Application**:
+   - Go to [Auth0 Dashboard](https://manage.auth0.com/)
+   - Create a new Single Page Application
+   - Copy Domain and Client ID
+
+2. **Configure Application URLs**:
+   - Add your development URLs (e.g., `http://localhost:8080/callback`) to:
+     - Allowed Callback URLs
+     - Allowed Logout URLs
+     - Allowed Web Origins
+
+3. **Environment Variables**:
+   ```env
+   VITE_AUTH0_DOMAIN=your-tenant.auth0.com
+   VITE_AUTH0_CLIENT_ID=your-client-id-here
+   ```
+
+4. **Features**:
+   - ✅ Secure token-based authentication
+   - ✅ Automatic token refresh
+   - ✅ Protected routes (all dashboard pages)
+   - ✅ Social login support (Google, GitHub, etc.)
+   - ✅ Multi-factor authentication support
+
+> **📖 Complete Guide**: See [AUTH0_SETUP.md](AUTH0_SETUP.md) for detailed setup instructions and troubleshooting
 
 ### Firebase Configuration
 
@@ -235,6 +292,18 @@ Chakravyuh_dashboard-main/
 │   │   │   ├── useNodeProcessor.ts
 │   │   │   └── alertUtils.ts
 │   │   └── use-mobile.tsx
+│   ├── auth/              # Authentication
+│   │   └── Auth0Provider.tsx  # Auth0 provider wrapper
+│   ├── components/        # React components
+│   │   ├── ui/            # shadcn/ui components
+│   │   └── ProtectedRoute.tsx # Route protection
+│   ├── hooks/             # Custom React hooks
+│   │   ├── firebase/      # Firebase-related hooks
+│   │   │   ├── useFirebase.ts
+│   │   │   ├── useNodeProcessor.ts
+│   │   │   └── alertUtils.ts
+│   │   ├── useAuth.ts     # Auth0 hook wrapper
+│   │   └── use-mobile.tsx
 │   ├── lib/               # Utility libraries
 │   │   ├── firebase.ts    # Firebase configuration
 │   │   ├── gemini.ts      # Gemini AI integration
@@ -243,11 +312,13 @@ Chakravyuh_dashboard-main/
 │   ├── pages/             # Page components
 │   │   ├── Index.tsx      # Main dashboard
 │   │   ├── AIIntelligence.tsx
-│   │   ├── Login.tsx
+│   │   ├── Login.tsx      # Auth0 login page
+│   │   ├── Callback.tsx   # Auth0 callback handler
 │   │   └── Regions.tsx
 │   ├── App.tsx            # Root component
 │   └── main.tsx           # Entry point
 ├── .env                   # Environment variables
+├── AUTH0_SETUP.md         # Auth0 setup guide
 ├── package.json
 ├── tsconfig.json
 ├── vite.config.ts
@@ -316,8 +387,10 @@ Chakravyuh_dashboard-main/
 App
 ├── QueryClientProvider
 │   └── BrowserRouter
-│       ├── Login (/)
-│       ├── Index / Dashboard (/dashboard)
+│       └── Auth0Provider
+│           ├── Login (/)
+│           ├── Callback (/callback)
+│           ├── Index / Dashboard (/dashboard) [Protected]
 │       │   ├── NetworkStatus
 │       │   ├── AlertsList
 │       │   ├── DeploymentMap
@@ -326,12 +399,12 @@ App
 │       │   ├── DroneStatus
 │       │   ├── AlertSound
 │       │   └── AlertPopup
-│       ├── AIIntelligence (/ai-intelligence)
+│       ├── AIIntelligence (/ai-intelligence) [Protected]
 │       │   ├── ThreatIntelligence
 │       │   ├── AlertAnalysis
 │       │   ├── DecisionSupport
 │       │   └── IntelligenceReport
-│       └── Regions (/regions)
+│       └── Regions (/regions) [Protected]
 ```
 
 ---
@@ -618,6 +691,29 @@ const summary = await generateAlertSummary(alert, {
 - Check network connectivity
 - Verify Firebase Realtime Database is enabled
 
+#### Auth0 Authentication Issues
+
+**Problem**: "403 Forbidden" or "Invalid callback URL"
+
+**Solutions**:
+- Verify `.env` file has `VITE_AUTH0_DOMAIN` and `VITE_AUTH0_CLIENT_ID`
+- Check Auth0 Application Settings has correct callback URLs:
+  - Add `http://localhost:8080/callback` (or your port) to Allowed Callback URLs
+  - Add `http://localhost:8080` to Allowed Logout URLs and Web Origins
+- Restart development server after updating `.env`
+- Wait 10-15 seconds after saving Auth0 settings for changes to propagate
+- Clear browser cache and localStorage if issues persist
+
+> **📖 Troubleshooting**: See [AUTH0_SETUP.md](AUTH0_SETUP.md) for detailed Auth0 troubleshooting
+
+**Problem**: Login page shows white screen
+
+**Solutions**:
+- Check browser console (F12) for errors
+- Verify `Auth0Provider.tsx` and `Login.tsx` files are not empty
+- Ensure `@auth0/auth0-react` package is installed: `npm install @auth0/auth0-react`
+- Check that Auth0Provider is properly wrapping the app in `App.tsx`
+
 #### Gemini API Not Working
 
 **Problem**: AI features show "API not configured"
@@ -627,6 +723,8 @@ const summary = await generateAlertSummary(alert, {
 - Restart development server after adding API key
 - Check API key is valid at [Google AI Studio](https://makersuite.google.com/app/apikey)
 - Verify API key has proper permissions
+
+> **📖 Setup Guide**: See [AI_SETUP.md](AI_SETUP.md) for detailed Gemini AI configuration
 
 #### Alerts Not Appearing
 
@@ -708,6 +806,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🙏 Acknowledgments
 
+- **Auth0** - For secure authentication infrastructure
 - **Google Gemini AI** - For powerful AI analysis capabilities
 - **Firebase** - For real-time database infrastructure
 - **shadcn/ui** - For beautiful UI components
@@ -721,8 +820,11 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 For issues, questions, or contributions:
 
 - **Issues**: Open an issue on GitHub
-- **Documentation**: Check `AI_SETUP.md` for AI configuration
+- **Documentation**: 
+  - Check `AUTH0_SETUP.md` for authentication setup
+  - Check `AI_SETUP.md` for AI configuration
 - **Firebase Docs**: [Firebase Documentation](https://firebase.google.com/docs)
+- **Auth0 Docs**: [Auth0 Documentation](https://auth0.com/docs)
 - **Gemini AI Docs**: [Google AI Studio](https://makersuite.google.com/)
 
 ---
