@@ -13,7 +13,8 @@ import { Node } from "@/lib/types";
 import { useFirebase } from "@/hooks/useFirebase";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Brain } from "lucide-react";
+import { Brain, LogOut } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 
 const Index = () => {
   const location = useLocation();
@@ -21,6 +22,9 @@ const Index = () => {
   const [isAddNodeModalOpen, setIsAddNodeModalOpen] = useState(false);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [showAlertPopup, setShowAlertPopup] = useState(false);
+  
+  // Use Auth0 hook for authentication
+  const { user, logout } = useAuth();
   
   // Use our Firebase hook
   const {
@@ -117,13 +121,23 @@ const Index = () => {
             <h1 className="text-2xl font-bold gradient-heading">Chakravyuh</h1>
             <p className="text-muted-foreground">Army Perimeter Defense System</p>
           </div>
-          <Button
-            onClick={() => navigate("/ai-intelligence")}
-            className="bg-gradient-to-r from-army-khaki to-army-olive hover:from-army-khaki/90 hover:to-army-olive/90 text-white"
-          >
-            <Brain className="h-4 w-4 mr-2" />
-            AI Intelligence
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={() => navigate("/ai-intelligence")}
+              className="bg-gradient-to-r from-army-khaki to-army-olive hover:from-army-khaki/90 hover:to-army-olive/90 text-white"
+            >
+              <Brain className="h-4 w-4 mr-2" />
+              AI Intelligence
+            </Button>
+            <Button
+              onClick={logout}
+              variant="outline"
+              className="border-army-red text-army-red hover:bg-army-red hover:text-white"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout {user?.email && `(${user.email.split('@')[0]})`}
+            </Button>
+          </div>
         </header>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
