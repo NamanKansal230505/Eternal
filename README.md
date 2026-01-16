@@ -1,2 +1,2 @@
 # Eternal
-A AI  and IoT enabled surveillance 
+An AI  and IoT enabled surveillance 
